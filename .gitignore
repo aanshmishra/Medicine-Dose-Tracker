@@ -1,0 +1,5 @@
+# Real Firebase config — added at deploy time from the FIREBASE_CONFIG GitHub secret
+firebase-config.js
+
+node_modules/
+_site/

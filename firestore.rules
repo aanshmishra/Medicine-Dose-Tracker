@@ -1,0 +1,11 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Each patient is one document. Its ID is a long random code that lives
+    // in the share link, so only people with the link can read or write it.
+    match /patients/{patientId} {
+      allow get, create, update: if patientId.size() >= 16;
+      allow list, delete: if false;
+    }
+  }
+}
