@@ -299,24 +299,30 @@ main { max-width: 640px; margin: 0 auto; padding: 16px 16px max(110px, calc(env(
 .progress-title { font-weight: 700; overflow-wrap: anywhere; }
 .progress-sub { color: var(--muted); font-size: 0.8rem; font-weight: 600; margin-top: 2px; }
 .progress-count { color: var(--muted); font-size: 0.9rem; font-weight: 600; }
-.card-actions { display: flex; gap: 8px; margin-top: 14px; }
+/* Four equal action tiles (icon over label) so they fit side by side on phones */
+.card-actions { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 14px; }
 .chip-btn {
   position: relative;
-  display: inline-flex;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 7px;
-  padding: 8px 14px 8px 12px;
-  border-radius: 999px;
+  gap: 5px;
+  padding: 10px 4px 9px;
+  border-radius: 14px;
   border: 1px solid var(--border);
   background: var(--surface-2);
-  font-size: 0.85rem;
+  font-size: 0.75rem;
   font-weight: 700;
   cursor: pointer;
   transition: border-color 0.2s, background 0.2s, transform 0.12s;
 }
-.chip-btn svg { color: var(--accent); }
+.chip-btn svg { width: 18px; height: 18px; color: var(--accent); }
 .chip-btn:hover { border-color: var(--accent); background: var(--accent-soft); }
 .chip-btn:active { transform: scale(0.96); }
+.chip-btn.danger { color: var(--red); }
+.chip-btn.danger svg { color: var(--red); }
+.chip-btn.danger:hover { border-color: var(--red-border); background: var(--red-soft); }
 /* Dot on the Notes chip when this medicine has notes */
 .chip-btn.has-notes::after {
   content: "";
@@ -402,20 +408,6 @@ main { max-width: 640px; margin: 0 auto; padding: 16px 16px max(110px, calc(env(
   border: 1px dashed var(--border);
 }
 .not-due-icon { font-size: 1.3rem; }
-
-.remove-btn {
-  display: block;
-  margin: 22px auto 0;
-  padding: 10px 16px;
-  border: none;
-  border-radius: 12px;
-  background: transparent;
-  color: var(--red);
-  font-size: 0.9rem;
-  font-weight: 700;
-  cursor: pointer;
-}
-.remove-btn:hover { background: var(--red-soft); }
 
 /* ---------- Dose cards ---------- */
 .dose-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }

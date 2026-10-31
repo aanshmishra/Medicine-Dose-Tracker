@@ -384,7 +384,6 @@ function render() {
   els.progressTitle.textContent = tab.custom || tab.renamed ? tab.name : "Today's doses";
   els.progressSub.textContent = scheduleText(tab.everyDays, tab.dosesPerDay);
   els.progressSub.classList.remove("hidden");
-  els.removeBtn.classList.remove("hidden");
   els.tabActions.classList.remove("hidden");
   els.notesBtn.classList.toggle("has-notes", !!tab.notes?.trim());
 
