@@ -828,6 +828,7 @@ function checkReminders() {
 }
 
 // ---------- Init ----------
+window.appStarted = true; // tells the reload-on-crash guard in index.html that startup worked
 render();
 
 onSnapshot(

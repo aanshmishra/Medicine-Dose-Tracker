@@ -33,6 +33,8 @@ jobs:
           fi
           mkdir _site
           cp index.html style.css app.js _site/
+          # Bust browser caches: each deploy gets new asset URLs.
+          sed -i "s/?v=dev/?v=${GITHUB_SHA::8}/g" _site/index.html
           printf 'export const firebaseConfig = %s;\n' "$FIREBASE_CONFIG" > _site/firebase-config.js
 
       - uses: actions/configure-pages@v5

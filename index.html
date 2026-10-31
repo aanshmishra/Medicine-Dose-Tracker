@@ -7,13 +7,30 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css" />
+  <!-- ?v=dev is replaced with the commit hash at deploy time, so an update never mixes old and new files -->
+  <link rel="stylesheet" href="style.css?v=dev" />
   <script>
     // Apply the saved theme before the page paints, so there's no flash.
     try {
       const t = localStorage.getItem("medicineTracker:theme");
       if (t) document.documentElement.dataset.theme = t;
     } catch {}
+
+    // If app.js crashes before it starts (e.g. a stale cached copy right after an update),
+    // reload once to fetch fresh files instead of sitting on "Loading…".
+    window.addEventListener("error", () => {
+      if (window.appStarted) return;
+      const KEY = "medicineTracker:reloadedAt";
+      let last = 0;
+      try { last = Number(sessionStorage.getItem(KEY)); } catch {}
+      if (Date.now() - last > 30000) {
+        try { sessionStorage.setItem(KEY, Date.now()); } catch {}
+        location.reload();
+      } else {
+        const text = document.getElementById("boot-text");
+        if (text) text.textContent = "Couldn't load the app. Please refresh the page.";
+      }
+    });
   </script>
 </head>
 <!-- "locked" hides the tracker until the patient's name and ID are known (see render in app.js) -->
@@ -325,6 +342,6 @@
 
   <div id="toast" class="toast hidden"></div>
 
-  <script type="module" src="app.js"></script>
+  <script type="module" src="app.js?v=dev"></script>
 </body>
 </html>
