@@ -65,6 +65,7 @@ const patientRef = doc(db, "patients", patientId);
 // Shared across all nurses (Firestore document):
 //   patient: { name, code }       – entered on first open; the tracker stays hidden until set
 //   builtinTabs: false            – set for patients created after the 1x/4x/6x tabs were retired
+//   builtins: { "4": { name, notes } } – nurse-given name and notes for the 1x/4x/6x tabs
 //   courses: { "4": { startDays, startDate }, "m3k…": … }  – days-left baseline per tab
 //   startDays, startDate          – old patient-wide days-left baseline (fallback for tabs without a course)
 //   doses: { "2026-10-30": { "4_0": true, ... } }  – keyed by date, so each day starts fresh
@@ -107,7 +108,10 @@ const BUILTIN_TABS = [1, 4, 6].map((n) => ({
 }));
 
 function allTabs() {
-  const builtins = shared?.builtinTabs === false ? [] : BUILTIN_TABS;
+  const builtins = shared?.builtinTabs === false ? [] : BUILTIN_TABS.map((t) => {
+    const extra = shared?.builtins?.[t.id] ?? {};
+    return { ...t, ...extra, label: extra.name ?? t.label, renamed: !!extra.name };
+  });
   const custom = Object.entries(shared?.medicines ?? {})
     .map(([id, m]) => ({ id, custom: true, label: m.name, ...m }))
     .sort((a, b) => a.createdAt - b.createdAt);
@@ -173,8 +177,12 @@ function addMedicine({ name, everyDays, dosesPerDay, notes, totalDays }) {
   return id;
 }
 
-function updateMedicine(id, field, value) {
-  updateDoc(patientRef, new FieldPath("medicines", id, field), value).catch(reportError);
+// Name and notes live under "medicines" for added medicines and "builtins" for 1x/4x/6x.
+function updateTabField(tab, field, value) {
+  const root = tab.custom ? "medicines" : "builtins";
+  // Apply locally first so the change shows right away; the snapshot confirms it.
+  ((shared[root] ??= {})[tab.id] ??= {})[field] = value;
+  updateDoc(patientRef, new FieldPath(root, tab.id, field), value).catch(reportError);
 }
 
 // Field/value pairs that delete this tab's reminders from dose index `from` onwards.
@@ -369,13 +377,12 @@ function render() {
   els.daysLeftLabel.textContent = left == null ? "set days" : left === 1 ? "day left" : "days left";
   els.daysLeftBtn.classList.toggle("low", left != null && left <= 3);
 
-  els.progressTitle.textContent = tab.custom ? tab.name : "Today's doses";
-  els.progressSub.textContent = tab.custom ? scheduleText(tab.everyDays, tab.dosesPerDay) : "";
-  els.progressSub.classList.toggle("hidden", !tab.custom);
+  const named = tab.custom || tab.renamed;
+  els.progressTitle.textContent = named ? tab.name : "Today's doses";
+  els.progressSub.textContent = named ? scheduleText(tab.everyDays, tab.dosesPerDay) : "";
+  els.progressSub.classList.toggle("hidden", !named);
   els.removeBtn.classList.toggle("hidden", !tab.custom);
   els.tabActions.classList.remove("hidden");
-  els.notesBtn.classList.toggle("hidden", !tab.custom);
-  els.renameBtn.classList.toggle("hidden", !tab.custom);
   els.notesBtn.classList.toggle("has-notes", !!tab.notes?.trim());
 
   const due = isDueToday(tab);
@@ -585,7 +592,7 @@ function hideOverlay(el) {
 // ---------- Rename ----------
 els.renameBtn.addEventListener("click", () => {
   const tab = findTab(local.activeTab);
-  if (!tab?.custom) return;
+  if (!tab) return;
   els.renameInput.value = tab.name;
   showOverlay(els.rename);
   els.renameInput.select();
@@ -596,7 +603,8 @@ els.renameForm.addEventListener("submit", (e) => {
   const tab = findTab(local.activeTab);
   const name = els.renameInput.value.trim();
   if (!name) return;
-  if (tab?.custom && name !== tab.name) updateMedicine(tab.id, "name", name);
+  if (tab && name !== tab.name) updateTabField(tab, "name", name);
+  render();
   hideOverlay(els.rename);
 });
 
@@ -650,8 +658,7 @@ els.notesEdit.addEventListener("click", () => {
   if (notesEditing) {
     const text = els.notesInput.value.trim();
     if (text !== (tab.notes?.trim() ?? "")) {
-      shared.medicines[tab.id].notes = text; // show the saved text right away; the snapshot confirms it
-      updateMedicine(tab.id, "notes", text);
+      updateTabField(tab, "notes", text);
     }
     notesEditing = false;
     renderNotes();
