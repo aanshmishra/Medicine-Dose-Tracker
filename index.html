@@ -40,26 +40,47 @@
     <span id="boot-text">Loading…</span>
   </div>
 
-  <!-- First-open screen: patient details -->
+  <!-- Signed-out screen: Google login or guest; guests then give a name before the tracker opens -->
   <div id="welcome" class="welcome hidden">
-    <form id="welcome-form" class="welcome-card" autocomplete="off">
+    <div id="welcome-card" class="welcome-card">
       <div class="brand-icon welcome-icon" aria-hidden="true">
         <svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M10.5 20.5 3.5 13.5a4.95 4.95 0 1 1 7-7l7 7a4.95 4.95 0 1 1-7 7Z" />
           <path d="m8.5 8.5 7 7" />
         </svg>
       </div>
-      <h1>Set up this patient</h1>
-      <p class="welcome-sub">Enter the patient's details to start tracking. Every nurse with the link will see them.</p>
-      <label class="field">
-        <span class="field-label">Patient name</span>
-        <input id="welcome-name" type="text" required maxlength="60" placeholder="e.g. Aansh Mishra" />
-      </label>
-      <label class="field">
-        <span class="field-label">Patient ID</span>
-        <input id="welcome-code" type="text" required maxlength="30" placeholder="e.g. XYZ-123" />
-      </label>
-      <button type="submit" class="primary">Start tracking</button>
+      <h1>Medicine Tracker</h1>
+      <p class="welcome-sub">Track doses together. Sign in with your Google account to continue.</p>
+      <button id="login-btn" type="button" class="primary">Log in</button>
+      <button id="signup-btn" type="button" class="ghost">Sign up</button>
+      <div class="welcome-or" aria-hidden="true">or</div>
+      <button id="attendant-btn" type="button" class="attendant-btn">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M16 11h6"/></svg>
+        Attendant
+      </button>
+      <button id="guest-btn" type="button" class="text-btn">Just looking? Continue as guest</button>
+    </div>
+
+    <form id="name-form" class="welcome-card hidden" autocomplete="off">
+      <div class="brand-icon welcome-icon" aria-hidden="true">👋</div>
+      <h1>What's your name?</h1>
+      <p class="welcome-sub">Guests need a name before opening the tracker.</p>
+      <input id="name-input" type="text" required maxlength="40" placeholder="Your name" />
+      <button type="submit" class="primary">Continue</button>
+      <button id="name-back" type="button" class="ghost">Back</button>
+    </form>
+
+    <!-- Attendants open an existing patient's tracker with just its PID -->
+    <form id="pid-form" class="welcome-card hidden" autocomplete="off">
+      <div class="brand-icon welcome-icon attendant-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M16 11h6"/></svg>
+      </div>
+      <h1>Attendant</h1>
+      <p class="welcome-sub">Enter the patient's PID to open their tracker.</p>
+      <input id="pid-input" class="pid-input" type="text" required maxlength="7" placeholder="XXX-XXX"
+        autocapitalize="characters" autocorrect="off" spellcheck="false" />
+      <button id="pid-enter" type="submit" class="primary attendant-primary">Enter</button>
+      <button id="pid-back" type="button" class="ghost">Back</button>
     </form>
   </div>
 
@@ -88,6 +109,9 @@
       <button id="days-left" class="days-left" title="Days left for this medicine">
         <span id="days-left-number">–</span>
         <span id="days-left-label" class="days-left-label">days left</span>
+      </button>
+      <button id="info-btn" class="icon-btn" title="About" aria-label="About">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>
       </button>
     </div>
   </header>
@@ -216,6 +240,41 @@
       <p id="add-summary" class="add-summary"></p>
       <button type="submit" class="primary">Add medicine</button>
     </form>
+  </div>
+
+  <!-- Info screen: about the app, creator, signed-in account -->
+  <div id="info-screen" class="screen hidden" role="dialog" aria-modal="true" aria-labelledby="info-title">
+    <div class="screen-inner">
+      <header class="screen-header">
+        <button type="button" id="info-back" class="icon-btn" title="Back" aria-label="Back">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+        </button>
+        <h2 id="info-title">Info</h2>
+      </header>
+
+      <section class="field">
+        <span class="field-label">About</span>
+        <p class="info-text">Medicine Tracker helps everyone caring for a patient keep track of their medicines in one shared place.
+          Add each medicine with how often and how many doses it needs, tick off doses as they're given, set reminders,
+          and keep notes for the next person. Share the link and everyone signed in sees the same doses, live.</p>
+      </section>
+
+      <section class="field">
+        <span class="field-label">Creator</span>
+        <p class="info-text">Aansh Mishra</p>
+      </section>
+
+      <section class="field">
+        <span class="field-label">Patient ID (PID)</span>
+        <p id="info-pid" class="info-text info-pid"></p>
+      </section>
+
+      <section class="field">
+        <span class="field-label">Signed in as</span>
+        <p id="info-account" class="info-text"></p>
+        <button id="signout-btn" type="button" class="ghost">Sign out</button>
+      </section>
+    </div>
   </div>
 
   <!-- Schedule sheet: days left, frequency, dosage for the current tab -->

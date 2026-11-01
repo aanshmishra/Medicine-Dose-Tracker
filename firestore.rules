@@ -2,9 +2,24 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     // Each patient is one document. Its ID is a long random code that lives
-    // in the share link, so only people with the link can read or write it.
+    // in the share link, so only signed-in people with the link can read or write it.
     match /patients/{patientId} {
-      allow get, create, update: if patientId.size() >= 16;
+      allow get, create, update: if request.auth != null && patientId.size() >= 16;
+      allow list, delete: if false;
+    }
+    // PID "XXX-XXX" -> { patientId }. Create-only, so a taken PID can never be overwritten
+    // (the app just draws another one), which keeps every PID unique.
+    match /pids/{pid} {
+      allow get: if request.auth != null;
+      allow create: if request.auth != null && pid.size() == 7
+        && request.resource.data.keys().hasOnly(["patientId"])
+        && request.resource.data.patientId is string
+        && request.resource.data.patientId.size() >= 16;
+      allow update, list, delete: if false;
+    }
+    // Each account (Google or guest) remembers its own patient, so signing in again opens it.
+    match /users/{uid} {
+      allow get, create, update: if request.auth != null && request.auth.uid == uid;
       allow list, delete: if false;
     }
   }

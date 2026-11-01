@@ -91,8 +91,8 @@ button { font: inherit; color: inherit; }
 
 .hidden { display: none !important; }
 
-/* ---------- Gate: loading + patient details ---------- */
-/* The tracker stays hidden until the patient's name and ID are saved */
+/* ---------- Gate: loading + Google login ---------- */
+/* The tracker stays hidden until someone is signed in and the patient has a name */
 body.locked > .app-header,
 body.locked > .tabs,
 body.locked > main,
@@ -139,6 +139,79 @@ body.locked > .fab { display: none; }
   letter-spacing: -0.03em;
 }
 .welcome-sub { margin: -4px 8px 8px; text-align: center; color: var(--muted); font-size: 0.92rem; line-height: 1.5; }
+.welcome-card .ghost { color: var(--text); }
+.welcome-card input {
+  padding: 14px;
+  font: inherit;
+  font-size: 1.1rem;
+  font-weight: 600;
+  text-align: center;
+  border-radius: 14px;
+  border: 1.5px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  outline: none;
+}
+.welcome-card input:focus { border-color: var(--accent); }
+.text-btn {
+  padding: 8px;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font-weight: 600;
+  font-size: 0.92rem;
+  cursor: pointer;
+}
+.welcome-icon:not(:has(svg)) { display: grid; place-items: center; font-size: 1.8rem; }
+
+/* Attendant: the app's red, blended toward the accent so it sits with the indigo/teal scheme */
+.welcome-or {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.welcome-or::before,
+.welcome-or::after { content: ""; flex: 1; height: 1px; background: var(--border); }
+.attendant-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 14px;
+  border-radius: 14px;
+  border: 1.5px solid var(--red-border);
+  background: var(--red-soft);
+  color: var(--red);
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s, border-color 0.2s, box-shadow 0.2s;
+}
+.attendant-btn:hover {
+  background: var(--red);
+  border-color: var(--red);
+  color: #fff;
+  box-shadow: 0 8px 20px rgba(229, 72, 77, 0.28);
+}
+/* Doubled classes: .brand-icon and .primary are defined further down and would win otherwise */
+.brand-icon.attendant-icon,
+.primary.attendant-primary {
+  background: linear-gradient(135deg, var(--red), color-mix(in srgb, var(--red) 65%, var(--accent)));
+  box-shadow: 0 8px 20px rgba(229, 72, 77, 0.3);
+}
+.primary.attendant-primary:disabled { opacity: 0.6; cursor: wait; }
+.welcome-card .pid-input {
+  font-size: 1.5rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  font-family: ui-monospace, monospace;
+  text-transform: uppercase;
+}
+.welcome-card .pid-input:focus { border-color: var(--red); }
 
 /* ---------- Header ---------- */
 .app-header {
@@ -717,6 +790,10 @@ main { max-width: 640px; margin: 0 auto; padding: 16px 16px max(110px, calc(env(
   color: var(--accent);
   box-shadow: var(--shadow);
 }
+
+.info-text { margin: 0; color: var(--muted); line-height: 1.6; overflow-wrap: anywhere; }
+.info-pid { color: var(--text); font-size: 1.3rem; font-weight: 800; letter-spacing: 0.08em; font-family: ui-monospace, monospace; }
+.field .ghost { margin-top: 6px; color: var(--text); }
 
 .add-summary { margin: 2px 4px; color: var(--muted); font-size: 0.9rem; font-weight: 600; overflow-wrap: anywhere; }
 

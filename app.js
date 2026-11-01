@@ -4,12 +4,23 @@ import {
   persistentLocalCache,
   persistentMultipleTabManager,
   doc,
+  getDoc,
   onSnapshot,
   setDoc,
   updateDoc,
   deleteField,
   FieldPath,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import {
+  getAuth,
+  onAuthStateChanged,
+  GoogleAuthProvider,
+  signInWithPopup,
+  signInWithRedirect,
+  signInAnonymously,
+  updateProfile,
+  signOut,
+} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { firebaseConfig } from "./firebase-config.js";
 
 function ordinal(n) {
@@ -39,19 +50,31 @@ function shortDate(daysFromToday) {
 }
 
 // ---------- Patient ID (lives in the share link) ----------
-function randomId(len = 20) {
-  const chars = "abcdefghijkmnpqrstuvwxyz23456789";
+function randomId(len = 20, chars = "abcdefghijkmnpqrstuvwxyz23456789") {
   const bytes = crypto.getRandomValues(new Uint8Array(len));
   return Array.from(bytes, (b) => chars[b % chars.length]).join("");
 }
 
-const params = new URLSearchParams(location.search);
-let patientId = params.get("patient");
-if (!patientId || patientId.length < 16) {
-  patientId = randomId();
-  params.set("patient", patientId);
-  history.replaceState(null, "", `${location.pathname}?${params}`);
+// ---------- PID (short code attendants will use to find a patient) ----------
+// Uppercase only and no look-alikes (0/O, 1/I/L), so it's easy to read out and type.
+// No "/" or ".": PIDs are also Firestore document ids.
+const PID_CHARS = "ABCDEFGHJKMNPQRSTUVWXYZ23456789#$%&@*+=?";
+
+function randomPid() {
+  const raw = randomId(6, PID_CHARS);
+  return `${raw.slice(0, 3)}-${raw.slice(3)}`;
 }
+
+// What an attendant typed -> "XXX-XXX", or null if it can't be a PID. Dash and case are optional.
+function normalizePid(text) {
+  const raw = text.replace(/[\s-]/g, "").toUpperCase();
+  if (raw.length !== 6 || [...raw].some((c) => !PID_CHARS.includes(c))) return null;
+  return `${raw.slice(0, 3)}-${raw.slice(3)}`;
+}
+
+// Both are set once someone signs in (see openPatient).
+let patientId = null;
+let patientRef = null;
 
 // ---------- Firebase ----------
 const app = initializeApp(firebaseConfig);
@@ -59,11 +82,13 @@ const app = initializeApp(firebaseConfig);
 const db = initializeFirestore(app, {
   localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
 });
-const patientRef = doc(db, "patients", patientId);
+const auth = getAuth(app);
+let user; // undefined until Firebase reports the sign-in state, then null or the Google user
 
 // ---------- State ----------
 // Shared across all nurses (Firestore document):
-//   patient: { name, code }       – entered on first open; the tracker stays hidden until set
+//   patient: { name, code }       – name comes from the first Google account to open it; code is legacy
+//   ownerUid                      – that account's uid
 //   builtinTabs: false            – set for patients created after the 1x/4x/6x tabs were retired
 //   builtins: { "4": { name, notes, everyDays, dosesPerDay, startDate, removed } } – nurse edits to 1x/4x/6x
 //   courses: { "4": { startDays, startDate }, "m3k…": … }  – days-left baseline per tab
@@ -74,20 +99,23 @@ const patientRef = doc(db, "patients", patientId);
 // Dose/reminder keys are `${tabId}_${doseIndex}`; tab IDs never contain "_".
 let shared = null; // null until the first snapshot arrives
 
-// Per-phone only (localStorage):
-const LOCAL_KEY = `medicineTracker:${patientId}`;
+// Per-phone only (localStorage), per patient:
 let local = { activeTab: "1", notified: {} }; // notified: "4_0" -> last date this phone alerted
-try {
-  local = { ...local, ...JSON.parse(localStorage.getItem(LOCAL_KEY)) };
-} catch {}
-local.activeTab = String(local.activeTab); // older versions stored a number
+
+function loadLocal() {
+  local = { activeTab: "1", notified: {} };
+  try {
+    local = { ...local, ...JSON.parse(localStorage.getItem(`medicineTracker:${patientId}`)) };
+  } catch {}
+  local.activeTab = String(local.activeTab); // older versions stored a number
+}
 
 function saveLocal() {
-  localStorage.setItem(LOCAL_KEY, JSON.stringify(local));
+  if (patientId) localStorage.setItem(`medicineTracker:${patientId}`, JSON.stringify(local));
 }
 
 function hasPatientDetails() {
-  return !!(shared?.patient?.name && shared?.patient?.code);
+  return !!shared?.patient?.name;
 }
 
 function courseOf(tabId) {
@@ -215,9 +243,24 @@ const els = {
   boot: document.getElementById("boot"),
   bootText: document.getElementById("boot-text"),
   welcome: document.getElementById("welcome"),
-  welcomeForm: document.getElementById("welcome-form"),
-  welcomeName: document.getElementById("welcome-name"),
-  welcomeCode: document.getElementById("welcome-code"),
+  loginBtn: document.getElementById("login-btn"),
+  signupBtn: document.getElementById("signup-btn"),
+  guestBtn: document.getElementById("guest-btn"),
+  welcomeCard: document.getElementById("welcome-card"),
+  nameForm: document.getElementById("name-form"),
+  nameInput: document.getElementById("name-input"),
+  nameBack: document.getElementById("name-back"),
+  attendantBtn: document.getElementById("attendant-btn"),
+  pidForm: document.getElementById("pid-form"),
+  pidInput: document.getElementById("pid-input"),
+  pidEnter: document.getElementById("pid-enter"),
+  pidBack: document.getElementById("pid-back"),
+  infoPid: document.getElementById("info-pid"),
+  infoBtn: document.getElementById("info-btn"),
+  infoScreen: document.getElementById("info-screen"),
+  infoBack: document.getElementById("info-back"),
+  infoAccount: document.getElementById("info-account"),
+  signoutBtn: document.getElementById("signout-btn"),
   patientName: document.getElementById("patient-name"),
   daysLeftBtn: document.getElementById("days-left"),
   daysLeftNum: document.getElementById("days-left-number"),
@@ -337,17 +380,18 @@ function selectTab(id) {
 
 let renderedDate = todayStr();
 
+// Spinner while sign-in state or the patient loads, login screen when signed out,
+// name form for a guest who hasn't given a name yet, PID form for an attendant.
 function renderGate() {
-  const ready = hasPatientDetails();
+  const askName = needsName();
+  const ready = !!user && !askName && !attendant && hasPatientDetails();
+  const welcome = user === null || askName || attendant;
   document.body.classList.toggle("locked", !ready);
-  els.boot.classList.toggle("hidden", !!shared);
-  const showWelcome = !!shared && !ready;
-  if (showWelcome && els.welcome.classList.contains("hidden")) {
-    els.welcome.classList.remove("hidden");
-    els.welcomeName.focus();
-  } else if (!showWelcome) {
-    els.welcome.classList.add("hidden");
-  }
+  els.boot.classList.toggle("hidden", ready || welcome);
+  els.welcome.classList.toggle("hidden", !welcome);
+  els.welcomeCard.classList.toggle("hidden", askName || attendant);
+  els.nameForm.classList.toggle("hidden", !askName);
+  els.pidForm.classList.toggle("hidden", !attendant);
   return ready;
 }
 
@@ -360,9 +404,9 @@ function render() {
   const tab = tabs.find((t) => t.id === local.activeTab) ?? tabs[0];
 
   els.patientName.textContent = shared.patient.name;
-  els.todayLabel.textContent = `ID ${shared.patient.code} · ` + new Date().toLocaleDateString([], {
-    weekday: "short", month: "short", day: "numeric",
-  });
+  const id = shared.patient.pid ? `PID ${shared.patient.pid}` : shared.patient.code ? `ID ${shared.patient.code}` : "";
+  els.todayLabel.textContent = (id ? `${id} · ` : "")
+    + new Date().toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" });
 
   if (notesTabId) renderNotes(); // another nurse may have changed or removed it
   if (scheduleTabId) renderSchedule();
@@ -477,18 +521,216 @@ els.themeBtn.addEventListener("click", () => {
   try { localStorage.setItem(THEME_KEY, next); } catch {}
 });
 
-// ---------- Welcome (patient details) ----------
-els.welcomeForm.addEventListener("submit", (e) => {
+// ---------- Sign-in (Google) ----------
+// Log in and Sign up are the same Google flow; a new account just gets a new tracker.
+async function signIn() {
+  const provider = new GoogleAuthProvider();
+  provider.setCustomParameters({ prompt: "select_account" });
+  try {
+    await signInWithPopup(auth, provider);
+  } catch (err) {
+    if (err.code === "auth/popup-closed-by-user" || err.code === "auth/cancelled-popup-request") return;
+    if (err.code === "auth/popup-blocked") return signInWithRedirect(auth, provider).catch(signInFailed);
+    signInFailed(err);
+  }
+}
+
+function signInFailed(err) {
+  console.error(err);
+  // Include the code (e.g. auth/unauthorized-domain) so setup problems are visible on a phone.
+  showToast(`Couldn't sign in with Google (${err.code || err.message}).`);
+}
+
+els.loginBtn.addEventListener("click", signIn);
+els.signupBtn.addEventListener("click", signIn);
+
+// ---------- Guest (anonymous) sign-in ----------
+// Guests get their own tracker like anyone else, but must give a name before it opens.
+els.guestBtn.addEventListener("click", () => signInAnonymously(auth).catch(signInFailed));
+
+// Only a guest starting their own tracker needs a name; attendants and share links open an existing one.
+function needsName() {
+  return !!user?.isAnonymous && !user.displayName?.trim() && !attendant
+    && !new URLSearchParams(location.search).get("patient");
+}
+
+els.nameForm.addEventListener("submit", async (e) => {
   e.preventDefault();
-  const name = els.welcomeName.value.trim();
-  const code = els.welcomeCode.value.trim();
-  if (!name || !code) return;
-  // An empty record is a brand-new patient: start without the old 1x/4x/6x tabs.
-  // Older patients also land here once (to add details) but already have data, so they keep them.
-  const fresh = Object.keys(shared ?? {}).length === 0;
-  const data = fresh ? { patient: { name, code }, builtinTabs: false } : { patient: { name, code } };
-  setDoc(patientRef, data, { merge: true }).catch(reportError);
+  const name = els.nameInput.value.trim();
+  if (!name) return;
+  try {
+    await updateProfile(user, { displayName: name });
+    startPatient(user);
+  } catch (err) {
+    reportError(err);
+  }
 });
+
+// A guest who backs out is signed out for good; that account can't be signed back into.
+els.nameBack.addEventListener("click", () => signOut(auth).catch(reportError));
+
+// ---------- Attendant (open a tracker by PID) ----------
+// Attendants sign in as a guest behind the scenes (the rules need someone signed in),
+// then the PID is looked up in pids/{pid} and that patient's tracker opens.
+let attendant = false; // PID form is showing
+let pendingPid = null; // looked up once the guest sign-in finishes
+
+els.attendantBtn.addEventListener("click", () => {
+  attendant = true;
+  els.pidInput.value = "";
+  render();
+  els.pidInput.focus();
+});
+
+els.pidBack.addEventListener("click", () => {
+  attendant = false;
+  pendingPid = null;
+  // A guest made only for this lookup has no tracker of its own, so drop it.
+  if (user?.isAnonymous && !patientId) signOut(auth).catch(reportError);
+  render();
+});
+
+// Format as they type: "abcd" -> "ABC-D". The dash appears with the 4th character, so backspace never fights it.
+els.pidInput.addEventListener("input", () => {
+  const input = els.pidInput;
+  const charsBeforeCaret = input.value.slice(0, input.selectionStart).replace(/[\s-]/g, "").length;
+  const raw = input.value.replace(/[\s-]/g, "").toUpperCase().slice(0, 6);
+  input.value = raw.length > 3 ? `${raw.slice(0, 3)}-${raw.slice(3)}` : raw;
+  // Keep the caret where it was, stepping over the dash
+  const caret = Math.min(charsBeforeCaret, 6) + (charsBeforeCaret > 3 ? 1 : 0);
+  input.setSelectionRange(caret, caret);
+});
+
+els.pidForm.addEventListener("submit", (e) => {
+  e.preventDefault();
+  const pid = normalizePid(els.pidInput.value);
+  if (!pid) return showToast("A PID has 6 characters, like ABC-D#3.");
+  els.pidInput.value = pid;
+  els.pidEnter.disabled = true;
+  pendingPid = pid;
+  if (user) openByPid(user);
+  else signInAnonymously(auth).catch((err) => {
+    els.pidEnter.disabled = false;
+    signInFailed(err);
+  }); // onAuthStateChanged then calls openByPid
+});
+
+async function openByPid(u) {
+  const pid = pendingPid;
+  try {
+    const id = (await getDoc(doc(db, "pids", pid))).data()?.patientId;
+    if (user !== u || pendingPid !== pid) return; // signed out or backed out meanwhile
+    if (!id) return showToast(`No patient found with PID ${pid}.`);
+    pendingPid = null;
+    attendant = false;
+    unsubscribe?.();
+    openPatient(id);
+  } catch (err) {
+    console.error(err);
+    showToast("Couldn't look up that PID — check your connection and try again.");
+  } finally {
+    els.pidEnter.disabled = false;
+  }
+}
+
+function googleName(u) {
+  return u.displayName || u.email?.split("@")[0] || "Patient";
+}
+
+// Which patient to open: the share link's, else this account's own, else a new one.
+async function resolvePatient(u) {
+  const fromLink = new URLSearchParams(location.search).get("patient");
+  const userRef = doc(db, "users", u.uid);
+  const home = (await getDoc(userRef)).data()?.patientId ?? null;
+  const id = fromLink?.length >= 16 ? fromLink : home ?? randomId();
+  if (!home) setDoc(userRef, { patientId: id }, { merge: true }).catch(reportError);
+  return id;
+}
+
+let unsubscribe = null; // stops the current patient's snapshot listener
+let claimed = false;
+let pidRequested = false;
+
+function openPatient(id) {
+  patientId = id;
+  patientRef = doc(db, "patients", id);
+  claimed = false;
+  pidRequested = false;
+  loadLocal();
+  const params = new URLSearchParams(location.search);
+  params.set("patient", id);
+  history.replaceState(null, "", `${location.pathname}?${params}`);
+
+  unsubscribe = onSnapshot(
+    patientRef,
+    (snap) => {
+      shared = snap.data() ?? {};
+      if (!shared.ownerUid) claimPatient();
+      if (!shared.patient?.pid) assignPid(); // new trackers, and older ones made before PIDs
+      render();
+      checkReminders();
+    },
+    showConnectionError
+  );
+}
+
+// The first Google account to open a tracker takes it over, and its name replaces any name typed before.
+function claimPatient() {
+  if (claimed) return; // once per open, so a failed write doesn't retry on every snapshot
+  claimed = true;
+  const data = { patient: { name: googleName(user) }, ownerUid: user.uid };
+  // An empty record is a brand-new patient: start without the old 1x/4x/6x tabs.
+  if (Object.keys(shared).length === 0) data.builtinTabs = false;
+  setDoc(patientRef, data, { merge: true }).catch(reportError);
+}
+
+// Reserve a PID in pids/{pid}, then save it on the patient. The rules only allow creating a
+// pids doc, never overwriting one, so a PID that's already taken fails and we draw another.
+async function assignPid() {
+  if (pidRequested) return; // once per open, like claimPatient
+  pidRequested = true;
+  const id = patientId;
+  for (let tries = 0; tries < 5; tries++) {
+    const pid = randomPid();
+    try {
+      await setDoc(doc(db, "pids", pid), { patientId: id });
+    } catch (err) {
+      if (err.code === "permission-denied") continue;
+      return reportError(err);
+    }
+    return setDoc(doc(db, "patients", id), { patient: { pid } }, { merge: true }).catch(reportError);
+  }
+  showToast("Couldn't create a PID. Check that the Firestore rules are published.");
+}
+
+function showConnectionError(err) {
+  console.error(err);
+  els.bootText.textContent = "Not connected";
+  els.todayLabel.textContent = "Not connected";
+  showToast("Couldn't connect to the database. Check that Firestore is created and the rules are published.");
+}
+
+onAuthStateChanged(auth, async (u) => {
+  user = u;
+  unsubscribe?.();
+  unsubscribe = null;
+  shared = null;
+  els.bootText.textContent = "Loading…";
+  render();
+  if (!u) return;
+  if (pendingPid) openByPid(u);
+  else if (!attendant && !needsName()) startPatient(u);
+});
+
+async function startPatient(u) {
+  render(); // a guest who just gave a name moves from the name form to the spinner
+  try {
+    const id = await resolvePatient(u);
+    if (user === u) openPatient(id);
+  } catch (err) {
+    showConnectionError(err);
+  }
+}
 
 // ---------- Steppers (− / + around a number input) ----------
 function readNumber(input) {
@@ -508,9 +750,44 @@ document.querySelectorAll(".stepper").forEach((stepper) => {
   );
 });
 
+// ---------- Full screens (add medicine, info) ----------
+// Each screen gets its own history entry, so the phone's back button closes it.
+if (history.state?.screen) history.replaceState(null, "");
+
+function openScreen(el) {
+  el.classList.remove("hidden");
+  history.pushState({ screen: true }, "");
+}
+
+function closeScreen(el) {
+  if (history.state?.screen) history.back(); // popstate hides the screen
+  else el.classList.add("hidden");
+}
+
+window.addEventListener("popstate", () => {
+  els.addScreen.classList.add("hidden");
+  els.infoScreen.classList.add("hidden");
+});
+
+// ---------- Info ----------
+els.infoBtn.addEventListener("click", () => {
+  els.infoAccount.textContent = user
+    ? (user.isAnonymous && !user.displayName ? "Attendant"
+      : [user.displayName, user.isAnonymous ? "Guest" : user.email].filter(Boolean).join(" · "))
+    : "";
+  els.infoPid.textContent = shared?.patient?.pid ?? "Not assigned yet";
+  openScreen(els.infoScreen);
+});
+els.infoBack.addEventListener("click", () => closeScreen(els.infoScreen));
+
+els.signoutBtn.addEventListener("click", () => {
+  els.infoScreen.classList.add("hidden");
+  // Drop the patient from the URL so the next account on this phone opens its own tracker.
+  history.replaceState(null, "", location.pathname);
+  signOut(auth).catch(reportError);
+});
+
 // ---------- Add / remove medicine ----------
-// The add screen gets its own history entry, so the phone's back button closes it.
-if (history.state?.addScreen) history.replaceState(null, "");
 
 let addUnit = "days";
 
@@ -538,17 +815,13 @@ function updateAddSummary() {
 function openAddScreen() {
   els.addForm.reset();
   setAddUnit("days");
-  els.addScreen.classList.remove("hidden");
-  history.pushState({ addScreen: true }, "");
+  openScreen(els.addScreen);
   els.addName.focus();
 }
 
 function closeAddScreen() {
-  if (history.state?.addScreen) history.back(); // popstate hides the screen
-  else els.addScreen.classList.add("hidden");
+  closeScreen(els.addScreen);
 }
-
-window.addEventListener("popstate", () => els.addScreen.classList.add("hidden"));
 
 els.addBtn.addEventListener("click", openAddScreen);
 els.emptyAdd.addEventListener("click", openAddScreen);
@@ -835,22 +1108,7 @@ function checkReminders() {
 
 // ---------- Init ----------
 window.appStarted = true; // tells the reload-on-crash guard in index.html that startup worked
-render();
-
-onSnapshot(
-  patientRef,
-  (snap) => {
-    shared = snap.data() ?? {};
-    render();
-    checkReminders();
-  },
-  (err) => {
-    console.error(err);
-    els.bootText.textContent = "Not connected";
-    els.todayLabel.textContent = "Not connected";
-    showToast("Couldn't connect to the database. Check that Firestore is created and the rules are published.");
-  }
-);
+render(); // the patient loads once onAuthStateChanged reports who's signed in
 
 setInterval(() => {
   if (todayStr() !== renderedDate) render(); // new day → everything shows red again

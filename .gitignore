@@ -3,3 +3,7 @@ firebase-config.js
 
 node_modules/
 _site/
+
+# Private Claude context, kept local
+PROJECT_CONTEXT.txt
+CLAUDE.local.md
